@@ -8,11 +8,13 @@ use crate::bls24zr::BLS24Zr;
 use crate::traits::{BLS24Field, One};
 use crypto_bigint::{Random, Uint, Zero};
 use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crypto_bigint::rand_core::TryRngCore;
-use rand::Rng;
+use crypto_bigint::rand_core::{RngCore, TryRngCore};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+/// The group <b>G&#x2082;</b> &#x2254; <i>E'</i>&lbrack;<i>r</i>&rbrack;(<b>F</b><sub><i>p&#x2074;</i></sub>)
+/// of <b>F</b><sub><i>p&#x2074;</i></sub>-rational <i>r</i>-torsion points on the BLS24 curve twist
+/// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
 pub struct BLS24Point4<PAR: BLS24Param, const LIMBS: usize> {
     pub(crate) x: BLS24Fp4<PAR, LIMBS>,
     pub(crate) y: BLS24Fp4<PAR, LIMBS>,
@@ -530,7 +532,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Add for BLS24Point4<PAR, LIMBS> {
 impl<PAR: BLS24Param, const LIMBS: usize> AddAssign for BLS24Point4<PAR, LIMBS> {
 
     /// Complete elliptic point addition
-    /// for a BLS24 curve <i>E</i>/<b>F</b><sub><i>p</i></sub> : <i>Y&sup2;Z</i> = <i>X&sup3; + bZ&sup3;</i>.
+    /// for a BLS24 curve twist <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
     ///
     /// Reference:
     ///
@@ -737,13 +739,13 @@ impl<PAR: BLS24Param, const LIMBS: usize> PartialEq<Self> for BLS24Point4<PAR, L
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Point4<PAR, LIMBS> {
     /// Pick a uniform point from the <i>n</i>-torsion of the BLS24 curve twist
     /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
-    fn random<R: Rng + ?Sized>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         Self::point_factory(BLS24Fp4::random(rng)).elim_cof()
     }
 
     /// Try to pick a uniform point from the <i>n</i>-torsion of the BLS24 curve twist
     /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, <R as TryRngCore>::Error> where R: TryRngCore {
+    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
         match BLS24Fp4::try_random(rng) {
             Ok(val) => Ok(Self::point_factory(val).elim_cof()),
             Err(e) => Err(e),
@@ -802,8 +804,8 @@ mod tests {
         BLS24600Param, BLS24605Param, BLS24609Param, BLS24617Param, BLS24619Param,
         BLS24623Param, BLS24627Param, BLS24629Param, BLS24631Param, BLS24639Param,
     };
-    use std::time::SystemTime;
     use crate::bls24fp2::BLS24Fp2;
+    use std::time::SystemTime;
     use super::*;
 
     const TESTS: usize = 10;

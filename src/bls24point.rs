@@ -7,8 +7,7 @@ use crate::bls24zr::BLS24Zr;
 use crate::traits::{BLS24Field, One};
 use crypto_bigint::{Random, Uint, Zero};
 use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crypto_bigint::rand_core::TryRngCore;
-use rand::Rng;
+use crypto_bigint::rand_core::{RngCore, TryRngCore};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -522,13 +521,13 @@ impl<PAR: BLS24Param, const LIMBS: usize> PartialEq<Self> for BLS24Point<PAR, LI
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Point<PAR, LIMBS> {
     /// Pick a uniform point from the <i>n</i>-torsion of the BLS24 curve
     /// <i>E/<b>F</b><sub>p</sub>: Y&sup2;Z = X&sup3; + bZ&sup3;</i>.
-    fn random<R: Rng + ?Sized>(rng: &mut R) -> Self {
+    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         Self::point_factory(BLS24Fp::random(rng))
     }
 
     /// Try to pick a uniform point from the <i>n</i>-torsion of the BLS24 curve
     /// <i>E/<b>F</b><sub>p</sub>: Y&sup2;Z = X&sup3; + bZ&sup3;</i>.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, <R as TryRngCore>::Error> where R: TryRngCore {
+    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
         match BLS24Fp::try_random(rng) {
             Ok(val) => Ok(Self::point_factory(val)),
             Err(e) => Err(e),

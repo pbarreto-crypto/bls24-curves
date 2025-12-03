@@ -6,7 +6,6 @@ use crate::traits::{BLS24Field, One};
 use crypto_bigint::{Integer, Limb, NonZero, Random, Uint, Word, Zero};
 use crypto_bigint::rand_core::{RngCore, TryRngCore};
 use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess};
-use rand::Rng;
 use sha3::{Shake128, Shake256};
 use sha3::digest::ExtendableOutput;
 use std::fmt::{Debug, Display, Formatter};
@@ -276,16 +275,20 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Field for BLS24Fp<PAR, LIMBS> {
         }
     }
 
-    /// Compute <i>u/2 mod p</i>.
+    /// Compute `self`/2 mod <i>p</i>.
     ///
-    /// Technique: if the lift of <i>u</i> (either in plain or in Montgomery form)
+    /// Technique: if the lift of `self` (either in plain or in Montgomery form)
     /// to &Zopf; is even, a right-shift does the required division;
-    /// if it is odd, then <i>u + p</i> is even, and <i>0 <= (u + p) >> 1 < p</i> is the desired value.
+    /// if it is odd, then `self` + <i>p</i> is even,
+    /// and hence 0 &leq; (`self` + <i>p</i>) &gt;&gt; 1 =
+    /// (`self` &gt;&gt; 1) + (<i>p</i> + 1) &gt;&gt; 1 &lt; <i>p</i>
+    /// is the desired value.
     #[inline]
     fn half(&self) -> Self {
-        let p: Uint<LIMBS> = Uint::from_words(PAR::MODULUS.try_into().unwrap());
+        let hp: Uint<LIMBS> = (Uint::from_words(PAR::MODULUS.try_into().unwrap()) + Uint::ONE) >> 1;
+        let hs = self.0 >> 1;
         Self {
-            0: Uint::conditional_select(&self.0, &self.0.add(p), self.0.is_odd()) >> 1,
+            0: Uint::conditional_select(&hs, &hs.add(hp), self.0.is_odd()),
             1: Default::default(),
         }
     }
@@ -498,7 +501,10 @@ impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Fp<PAR, LIMBS> {
         let mut w: [Word; LIMBS] = [0; LIMBS];
         loop {
             // uniformly sample the bit capacity of the modulus:
-            rng.fill(&mut w);
+            //rng.fill(&mut w);  // deimplementing this useful function from crypto_bigint was a lusterless decision
+            for i in 0..LIMBS {
+                w[i] = rng.next_u64();
+            }
             w[top] &= mask;
             // rejection sampling for the most significant word:
             while w[top].cmp(&PAR::MODULUS[top]).is_gt() {  // this means the whole value exceeds the modulus
@@ -513,7 +519,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Fp<PAR, LIMBS> {
     }
 
     /// Try to pick a uniform element from <b>F</b><sub><i>p</i></sub> by rejection sampling mod <i>p</i>.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, <R as TryRngCore>::Error> where R: TryRngCore {
+    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
         let p: Uint<LIMBS> = Uint::from_words(PAR::MODULUS.try_into().unwrap());
         let top = PAR::MODULUS.len() - 1;
         let mask = (1 << (p.bits() & 63)) - 1;
@@ -596,7 +602,6 @@ mod tests {
     };
     use crypto_bigint::NonZero;
     use crypto_bigint::rand_core::RngCore;
-    use rand::Rng;
     use std::time::SystemTime;
     use super::*;
 
@@ -682,7 +687,10 @@ mod tests {
             //println!("k1*e1 ? {}", BLS24Fp::from_word(k1)*e1);
             assert_eq!(k1*e1, BLS24Fp::from_word(k1)*e1);
             let mut w1: [Word; LIMBS] = [0; LIMBS];
-            rng.fill(&mut w1);
+            //rng.fill(&mut w1);  // deimplementing this useful function from crypto_bigint was a lusterless decision
+            for i in 0..LIMBS {
+                w1[i] = rng.next_u64();
+            }
             let u1 = Uint::from_words(w1).rem(&nzp);
             //println!("u1 = {}", u1.to_string_radix_vartime(10));
             //println!("u1*e1 = {}", u1*e1);

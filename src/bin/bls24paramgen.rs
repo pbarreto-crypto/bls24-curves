@@ -101,8 +101,8 @@ fn poly_u(up: Word) -> String {
 /// and if still more than one choice is viable, the one with the largest group order is selected.
 ///
 /// The range of supported parameters covers target security between ~2&sup1;&sup2;&#x2078; to ~2&sup2;&#x2075;&#x2076; bits,
-/// specifically with no curve being included with <i>r</i> < 2&sup2;&#x2075;&#x2075; or <i>r</i> > 2&#x2075;&sup1;&sup2;,
-/// nor with p > 2&#x2076;&#x2074;&#x2070; (ten 64-bit limbs) for practical considerations.
+/// specifically with no curve being included with <i>r</i> &lt; 2&sup2;&#x2075;&#x2075; or <i>r</i> &gt; 2&#x2075;&sup1;&sup2;,
+/// nor with p &gt; 2&#x2076;&#x2074;&#x2070; (ten 64-bit limbs) for practical considerations.
 ///
 /// Each byte of a parameter descriptor on this list indicates one term of the curve parameter <i>u</i>:
 /// if the <i>k</i>-th term is +2<i>&#x1D50;</i>, the <i>k</i>-th byte is set to <i>m</i>,

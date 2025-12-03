@@ -25,7 +25,7 @@ and <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> &simeq; <b>F</b><sub><i>p&
 (notice the signs of <i>&xi;</i> and <i>v</i>).
 
 This family also tends to be KZG-friendly, in the sense that the curve order <i>r</i> has high 2-adicity
-(that is, 2<i>&#x1D50;</i> | <i>r</i> - 1 for some fairly large <i>m</i>>) by just requiring
+(that is, 2<i>&#x1D50;</i> | <i>r</i> - 1 for some fairly large <i>m</i>) by just requiring
 <i>u</i> itself to be a multiple of a suitably high power of 2.
 The equations of the curve and its twist take simple, uniform shapes, with
 <i>b</i> = 4 and <i>b'</i> = 4<i>v</i>.

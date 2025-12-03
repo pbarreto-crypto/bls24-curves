@@ -68,16 +68,17 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp24<PAR, LIMBS> {
         }
     }
 
-    /// Assemble an <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> element from its components.
+    /// Assemble an <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> element
+    /// from its <b>F</b><sub><i>p&#x2074;</i></sub> components.
     #[inline]
-    pub(crate) fn from(v: [BLS24Fp4<PAR, LIMBS>; 6]) -> Self {
+    pub(crate) fn from(a: [BLS24Fp4<PAR, LIMBS>; 6]) -> Self {
         Self {
-            a0: v[0],
-            a1: v[1],
-            a2: v[2],
-            a3: v[3],
-            a4: v[4],
-            a5: v[5],
+            a0: a[0],
+            a1: a[1],
+            a2: a[2],
+            a3: a[3],
+            a4: a[4],
+            a5: a[5],
         }
     }
 
@@ -252,7 +253,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp24<PAR, LIMBS> {
         v
     }
 
-    /// Compute `self`<sup>(<i>p</i>&sup2;&#x2074;-1)/<i>r</i></sup> in <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    /// Compute `self`<sup>(<i>p&sup2;&#xFEFF;&#x2074;</i>-1)/<i>r</i></sup> in <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
     ///
     /// References:
     ///
@@ -719,7 +720,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Fp24<PAR, LIMBS> {
     }
 
     /// Try to pick a uniform element from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> by rejection sampling.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, <R as TryRngCore>::Error> where R: TryRngCore {
+    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
         let try_a0 = match BLS24Fp4::try_random(rng) {
             Ok(val) => Ok(val),
             Err(e) => Err(e),

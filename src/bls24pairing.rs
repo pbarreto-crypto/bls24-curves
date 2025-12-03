@@ -105,7 +105,6 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Pairing<PAR, LIMBS> {
                 f = f.mul_023(L_00, L_10, L_01);
                 let mut Z3 = Z1*Z2;
                 let mut T3 = T1.sq();
-                T3 = T3;
                 X3 = T3*X3;
                 T3 = T1*T3;
                 let mut T4 = T2.sq();
@@ -210,7 +209,6 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Pairing<PAR, LIMBS> {
 
                 let mut Z3 = Z1*Z2;
                 let mut T3 = T1.sq();
-                T3 = T3;
                 X3 = T3*X3;
                 T3 = T1*T3;
                 let mut T4 = T2.sq();
