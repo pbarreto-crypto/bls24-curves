@@ -3,13 +3,12 @@ compile_error!("this crate requires 64-bit limbs");
 
 #[allow(unused)]
 
+use crate::bls24fp::BLS24Fp;
 use crate::bls24param::BLS24Param;
 use crate::traits::{BLS24Field, One};
-use crypto_bigint::{Integer, Limb, NonZero, Random, Uint, Word, Zero};
-use crypto_bigint::rand_core::{RngCore, TryRngCore};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess};
-use sha3::{Shake128, Shake256};
-use sha3::digest::ExtendableOutput;
+use crypto_bigint::{Choice, CtAssign, CtEq, CtLt, CtSelect, Limb, NonZero, Random, Uint, Word, Zero};
+use crypto_bigint::rand_core::{Rng, TryRng};
+use shake::{ExtendableOutput, Shake128, Shake256};
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -38,7 +37,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Zr<PAR, LIMBS> {
         let (_, carry) = t_lo.carrying_add(&mp_lo, Limb::ZERO);
         let (t, _) = t_hi.carrying_add(&mp_hi, carry);
         // return if t < r { t } else { t - r }
-        t - Uint::conditional_select(&r, &Uint::ZERO, t.ct_lt(&r))
+        t - r.ct_select(&Uint::ZERO, t.ct_lt(&r))
     }
 
     /// Convert an unsigned integer (Uint) value <i>w</i> to Montgomery form,
@@ -230,9 +229,9 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Field for BLS24Zr<PAR, LIMBS> {
     #[inline]
     fn half(&self) -> Self {
         let hr: Uint<LIMBS> = (Uint::from_words(PAR::ORDER.try_into().unwrap()) + Uint::ONE) >> 1;
-        let hs = self.0 >> 1;
+        let hs: Uint<LIMBS> = self.0 >> 1;
         Self {
-            0: Uint::conditional_select(&hs, &hs.add(hr), self.0.is_odd()),
+            0: hs.ct_select(&hs.add(hr), self.0.is_odd()),
             1: Default::default(),
         }
     }
@@ -240,7 +239,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Field for BLS24Zr<PAR, LIMBS> {
     /// Compute the square of `self`.
     #[inline]
     fn sq(&self) -> Self {
-        let (lo, hi) = self.0.square_wide();
+        let (lo, hi) = self.0.widening_square();
         Self {
             0: Self::redc(lo, hi),
             1: Default::default(),
@@ -250,7 +249,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Field for BLS24Zr<PAR, LIMBS> {
     /// Compute the cube of `self`.
     #[inline]
     fn cb(&self) -> Self {
-        let (lo, hi) = self.0.square_wide();
+        let (lo, hi) = self.0.widening_square();
         let (lo, hi) = self.0.widening_mul(&Self::redc(lo, hi));
         Self {
             0: Self::redc(lo, hi),
@@ -280,17 +279,16 @@ impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Zr<PAR, LIMBS> {
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConditionallySelectable for BLS24Zr<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Zr<PAR, LIMBS> {}
+
+impl<PAR: BLS24Param, const LIMBS: usize> CtAssign for BLS24Zr<PAR, LIMBS> {
     #[inline]
-    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        Self {
-            0: Uint::conditional_select(&a.0, &b.0, choice),
-            1: Default::default(),
-        }
+    fn ct_assign(&mut self, src: &Self, choice: Choice) {
+        self.0.ct_assign(&src.0, choice);
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Zr<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> CtEq for BLS24Zr<PAR, LIMBS> {
     #[inline]
     fn ct_eq(&self, other: &Self) -> Choice {
         self.0.ct_eq(&other.0)
@@ -302,7 +300,15 @@ impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Zr<PAR, LIMBS>
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Zr<PAR, LIMBS> {}
+impl<PAR: BLS24Param, const LIMBS: usize> CtSelect for BLS24Zr<PAR, LIMBS> {
+    #[inline]
+    fn ct_select(&self, other: &Self, choice: Choice) -> Self {
+        Self {
+            0: self.0.ct_select(&other.0, choice),
+            1: Default::default(),
+        }
+    }
+}
 
 impl<PAR: BLS24Param, const LIMBS: usize> Debug for BLS24Zr<PAR, LIMBS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -355,7 +361,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Zr<PAR, LIMBS>> for Word {
         let mut fac = self as u8;
         let mut add = rhs;
         for _ in 0..4 {
-            val = BLS24Zr::conditional_select(&val, &(val + add), Choice::from(fac & 1));
+            val.ct_assign(&(val + add), Choice::from(fac & 1));
             fac >>= 1;
             add += add;
         }
@@ -375,7 +381,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Zr<PAR, LIMBS>> for i64 {
     #[inline]
     fn mul(self, rhs: BLS24Zr<PAR, LIMBS>) -> Self::Output {
         let u = BLS24Zr::from_word(self.unsigned_abs())*rhs;
-        Self::Output::conditional_select(&u, &(-u), Choice::from((self < 0) as u8))
+        u.ct_select(&(-u), Choice::from((self < 0) as u8))
     }
 }
 
@@ -423,7 +429,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> One for BLS24Zr<PAR, LIMBS> {
     }
 
     fn is_one(&self) -> Choice {
-        Self::redc(self.0, Uint::ZERO).ct_eq(&Uint::ONE)
+        Self::redc(self.0, Uint::<LIMBS>::ZERO).ct_eq(&Uint::<LIMBS>::ONE)
     }
 }
 
@@ -438,8 +444,32 @@ impl<PAR: BLS24Param, const LIMBS: usize> PartialEq for BLS24Zr<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Zr<PAR, LIMBS> {
+    /// Try to pick a uniform element from &Zopf;<i>&#x2099;</i> by rejection sampling mod <i>n</i>.
+    fn try_random_from_rng<R: TryRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        let r: Uint<LIMBS> = Uint::from_words(PAR::ORDER.try_into().unwrap());
+        let top = PAR::ORDER.len() - 1;
+        let mask = (1 << 62) - 1; // modulus bitlength is always 64*LIMBS - 2
+        let mut w: [Word; LIMBS] = [0; LIMBS];
+        loop {
+            // uniformly sample the bit capacity of the modulus:
+            for wi in &mut w {
+                *wi = rng.try_next_u64()?
+            }
+            w[top] &= mask;
+            // rejection sampling for the most significant word:
+            while w[top].cmp(&PAR::ORDER[top]).is_gt() {  // this means the whole value exceeds the modulus
+                w[top] = rng.try_next_u64()? & mask;
+            }
+            // rejection sampling for the whole value:
+            let v = Uint::from_words(w);
+            if v.cmp(&r).is_lt() {
+                return Ok(Self::from_uint(v));
+            }
+        }
+    }
+
     /// Pick a uniform element from &Zopf;<i>&#x2099;</i> by rejection sampling mod <i>n</i>.
-    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
+    fn random_from_rng<R: Rng + ?Sized>(rng: &mut R) -> Self {
         let r: Uint<LIMBS> = Uint::from_words(PAR::ORDER.try_into().unwrap());
         let rbits = r.bits();
         let top: usize = (((rbits + 63) >> 6) - 1) as usize;
@@ -463,30 +493,6 @@ impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Zr<PAR, LIMBS> {
             let v = Uint::from_words(w);
             if v.cmp(&r).is_lt() {
                 return Self::from_uint(v);
-            }
-        }
-    }
-
-    /// Try to pick a uniform element from &Zopf;<i>&#x2099;</i> by rejection sampling mod <i>n</i>.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, <R as TryRngCore>::Error> where R: TryRngCore {
-        let r: Uint<LIMBS> = Uint::from_words(PAR::ORDER.try_into().unwrap());
-        let top = PAR::ORDER.len() - 1;
-        let mask = (1 << 62) - 1; // modulus bitlength is always 64*LIMBS - 2
-        let mut w: [Word; LIMBS] = [0; LIMBS];
-        loop {
-            // uniformly sample the bit capacity of the modulus:
-            for wi in &mut w {
-                *wi = rng.try_next_u64()?
-            }
-            w[top] &= mask;
-            // rejection sampling for the most significant word:
-            while w[top].cmp(&PAR::ORDER[top]).is_gt() {  // this means the whole value exceeds the modulus
-                w[top] = rng.try_next_u64()? & mask;
-            }
-            // rejection sampling for the whole value:
-            let v = Uint::from_words(w);
-            if v.cmp(&r).is_lt() {
-                return Ok(Self::from_uint(v));
             }
         }
     }
@@ -550,7 +556,7 @@ mod tests {
         BLS24623Param, BLS24627Param, BLS24629Param, BLS24631Param, BLS24639Param,
     };
     use crypto_bigint::NonZero;
-    use crypto_bigint::rand_core::RngCore;
+    use crypto_bigint::rand_core::Rng;
     use std::time::SystemTime;
     use super::*;
 
@@ -586,7 +592,7 @@ mod tests {
             //println!("m1 ? {}", m1);
             assert_eq!(Uint::from_word(v1), m1.to_uint());
 
-            let e1: BLS24Zr<PAR, LIMBS> = BLS24Zr::random(&mut rng);
+            let e1: BLS24Zr<PAR, LIMBS> = BLS24Zr::random_from_rng(&mut rng);
             //println!("e1     = {}", e1);
             //println!("e1 + 0 = {}", e1 + BLS24Zr::ZERO);
             assert_eq!(e1 + BLS24Zr::zero(), e1);
@@ -636,9 +642,9 @@ mod tests {
             //println!("u1*e1 ? {}", BLS24Zr::from_words(w1)*e1);
             assert_eq!(u1*e1, BLS24Zr::from_words(w1)*e1);
 
-            let f1 = BLS24Zr::random(&mut rng);
+            let f1 = BLS24Zr::random_from_rng(&mut rng);
             //println!("f1     = {}", f1);
-            let g1 = BLS24Zr::random(&mut rng);
+            let g1 = BLS24Zr::random_from_rng(&mut rng);
             //println!("g1     = {}", g1);
 
             // commutativity of addition and multiplication:

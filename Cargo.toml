@@ -1,6 +1,6 @@
 [package]
 name = "bls24-curves"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Paulo L. Barreto"]
 license = "MIT OR Apache-2.0"
@@ -12,9 +12,9 @@ keywords = ["bilinear-pairings", "BLS-curves", "BLS24-curves"]
 categories = ["algorithms", "cryptography"]
 
 [dependencies]
-crypto-bigint = { version = "0.7.0-rc.10", features = ["alloc"] }
-rand = "0.10.0-rc.5"
-sha3 = "0.11.0-rc.3"
+crypto-bigint = { version = "0.7.5", features = ["alloc"] }
+rand = "0.10.2"
+shake = "0.1.0"
 
 [[bin]]
 name = "bls24paramgen"

@@ -9,10 +9,9 @@ use bls24_curves::bls24param::{BLS24Param, BLS24317Param, BLS24324Param, BLS2432
 use bls24_curves::bls24point::BLS24Point;
 use bls24_curves::bls24point4::BLS24Point4;
 use bls24_curves::bls24zr::BLS24Zr;
-use bls24_curves::traits::{BLS24Field, One};
-use crypto_bigint::{Random, Uint, Zero};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crypto_bigint::rand_core::RngCore;
+use bls24_curves::traits::One;
+use crypto_bigint::{Choice, CtAssign, CtEq, Random, Uint, Zero};
+use crypto_bigint::rand_core::Rng;
 use std::marker::PhantomData;
 use std::time::SystemTime;
 
@@ -79,9 +78,9 @@ impl<PAR: BLS24Param, const LIMBS: usize> BGLS<PAR, LIMBS> {
     /// The user's public key is <i>V</i> &in; <b>G</b><i>&#x2082;</i>
     /// and their private key is <i>s</i> &in; &Zopf;<i>&#x2099;&ast;</i>.
     #[allow(non_snake_case)]
-    pub fn keygen<R: RngCore + ?Sized>(rng: &mut R, Q: &BLS24Point4<PAR, LIMBS>)
+    pub fn keygen<R: Rng + ?Sized>(rng: &mut R, Q: &BLS24Point4<PAR, LIMBS>)
             -> (BLS24Point4<PAR, LIMBS>, BLS24Zr<PAR, LIMBS>) {
-        let s = BLS24Zr::random(rng);
+        let s = BLS24Zr::random_from_rng(rng);
         let V = s*(*Q);
         (V, s)
     }
@@ -155,10 +154,10 @@ impl<PAR: BLS24Param, const LIMBS: usize> BGLS<PAR, LIMBS> {
     /// <i>Q<sub>adj</sub></i> &in; <b>G</b><i>&#x2082;</i>,
     /// and their private key is <i>s<sub>adj</sub></i> &in; &Zopf;<i>&#x2099;&ast;</i>.
     #[allow(non_snake_case)]
-    pub fn ve_keygen<R: RngCore + ?Sized>(rng: &mut R,
+    pub fn ve_keygen<R: Rng + ?Sized>(rng: &mut R,
             P: &BLS24Point<PAR, LIMBS>, Q: &BLS24Point4<PAR, LIMBS>)
             -> (BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Zr<PAR, LIMBS>) {
-        let s_adj = BLS24Zr::random(rng);
+        let s_adj = BLS24Zr::random_from_rng(rng);
         let P_adj = s_adj*(*P);
         let Q_adj = s_adj*(*Q);
         (P_adj, Q_adj, s_adj)
@@ -188,7 +187,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BGLS<PAR, LIMBS> {
     /// &in; <b>G</b><i>&#x2081;</i>.  The verifiably encrypted signature is the pair
     /// (<i>&omega;</i>, <i>&mu;</i>) &in; <b>G</b><i>&#x2081;</i> &times; <b>G</b><i>&#x2081;</i>.
     #[allow(non_snake_case)]
-    pub fn ve_sign<R: RngCore + ?Sized>(rng: &mut R,
+    pub fn ve_sign<R: Rng + ?Sized>(rng: &mut R,
             P: &BLS24Point<PAR, LIMBS>,
             V: &BLS24Point4<PAR, LIMBS>, s: &BLS24Zr<PAR, LIMBS>,
             P_adj: &BLS24Point<PAR, LIMBS>,
@@ -196,7 +195,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BGLS<PAR, LIMBS> {
             -> (BLS24Point<PAR, LIMBS>, BLS24Point<PAR, LIMBS>) {
         let M = BGLS::H(&V, m);
         let sigma = (*s)*M;
-        let r = BLS24Zr::random(rng);
+        let r = BLS24Zr::random_from_rng(rng);
         let mu = r*(*P);
         let sigma_adj = r*(*P_adj);
         let omega = sigma + sigma_adj;
@@ -241,7 +240,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BGLS<PAR, LIMBS> {
         let omega = &Sigma.0;
         let mu = &Sigma.1;
         let adj = (*omega) - (*s_adj)*(*mu);
-        sigma.conditional_assign(&adj, ok);
+        sigma.ct_assign(&adj, ok);
         ok
     }
 }

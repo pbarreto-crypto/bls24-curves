@@ -1,8 +1,8 @@
-use crypto_bigint::subtle::{Choice, ConstantTimeEq};
+use crypto_bigint::{Choice, CtEq};
 
 /// Multiplicative identity (unity).
 #[allow(unused)]
-pub trait One: ConstantTimeEq + Sized {
+pub trait One: CtEq + Sized {
     /// Create an instance of the multiplicative identity (i.e. the value `1`)
     /// in the underlying algebraic structure.
     fn one() -> Self;

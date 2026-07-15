@@ -6,9 +6,8 @@ use crate::bls24fp2::BLS24Fp2;
 use crate::bls24fp4::BLS24Fp4;
 use crate::bls24param::BLS24Param;
 use crate::traits::{BLS24Field, One};
-use crypto_bigint::{Random, Uint, Word, Zero};
-use crypto_bigint::rand_core::{RngCore, TryRngCore};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use crypto_bigint::{Choice, CtAssign, CtEq, CtSelect, Random, Uint, Word, Zero};
+use crypto_bigint::rand_core::{Rng, TryRng};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -187,7 +186,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp24<PAR, LIMBS> {
             // perform constant-time sequential search on t to extract t[d]:
             let mut w = Self::one();
             for e in 0..16 {  // t[] contains 16 serialized points...
-                w = Self::conditional_select(&w, &t[e], e.ct_eq(&d)); // ... (of which only the d-th is to be kept)
+                w.ct_assign(&t[e], e.ct_eq(&d)); // ... (of which only the d-th is to be kept)
             }
             v *= w;  // accumulate pt[d] into v
         }
@@ -335,50 +334,12 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp24<PAR, LIMBS> {
             a5: d_05 + d_23,
         }
     }
-
-    /// Multiply `self` by a sparse <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> value
-    /// of form <i>w&#8320;</i> + <i>w&#8322;z&sup2;</i> + <i>w&#8323;z&sup3;</i>
-    /// where <i>w&#8320;</i> &in; {0, 1}.
-    /// Cost: 9 <b>F</b><sub><i>p&#x2074;</i></sub> multiplications.
-    #[inline]
-    pub(crate) fn mul_b23(&self, rhs0: Choice, rhs2: BLS24Fp4<PAR, LIMBS>, rhs3: BLS24Fp4<PAR, LIMBS>) -> Self {
-        // Karatsuba multiplication:
-
-        let zero = BLS24Fp4::<PAR, LIMBS>::zero();
-        let one = BLS24Fp4::<PAR, LIMBS>::one();
-        let d_00 = BLS24Fp4::conditional_select(&zero, &self.a0, rhs0);
-        let d_22 = self.a2*rhs2;
-        let d_33 = self.a3*rhs3;
-
-        let d_01 = BLS24Fp4::conditional_select(&zero, &(self.a0 + self.a1), rhs0) - d_00;
-        let d_02 = (self.a0 + self.a2)*(BLS24Fp4::conditional_select(&zero, &one, rhs0) + rhs2) - d_00 - d_22;
-        let d_04 = BLS24Fp4::conditional_select(&zero, &(self.a0 + self.a4), rhs0) - d_00;
-        let d_13 = (self.a1 + self.a3)*rhs3 - d_33;
-        let d_23 = (self.a2 + self.a3)*(rhs2 + rhs3) - d_22 - d_33;
-        let d_24 = (self.a2 + self.a4)*rhs2 - d_22;
-        let d_35 = (self.a3 + self.a5)*rhs3 - d_33;
-
-        let d_03 = (self.a0 + self.a1 + self.a2 + self.a3)*(BLS24Fp4::conditional_select(&zero, &one, rhs0) + rhs2 + rhs3)
-            - (d_00 + d_22 + d_33 + d_01 + d_02 + d_13 + d_23);
-        let d_05 = BLS24Fp4::conditional_select(&zero, &(self.a0 + self.a1 + self.a4 + self.a5), rhs0)
-            - (d_00 + d_01 + d_04);
-        let d_25 = (self.a2 + self.a3 + self.a4 + self.a5)*(rhs2 + rhs3)
-            - (d_22 + d_33 + d_23 + d_24 + d_35);
-
-        Self {
-            a0: d_00 - (d_24 + d_33).mul_v(),
-            a1: d_01 - d_25.mul_v(),
-            a2: d_02 - d_35.mul_v(),
-            a3: d_03,
-            a4: d_04 + d_13 + d_22,
-            a5: d_05 + d_23,
-        }
-    }
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Add for BLS24Fp24<PAR, LIMBS> {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         let mut val = self;
         val += rhs;
@@ -387,6 +348,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Add for BLS24Fp24<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> AddAssign for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.a0 += rhs.a0;
         self.a1 += rhs.a1;
@@ -493,6 +455,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Field for BLS24Fp24<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             a0: self.a0.clone(), a1: self.a1.clone(), a2: self.a2.clone(),
@@ -501,31 +464,47 @@ impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Fp24<PAR, LIMBS> {
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConditionallySelectable for BLS24Fp24<PAR, LIMBS> {
-    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        let a0 = BLS24Fp4::conditional_select(&a.a0, &b.a0, choice);
-        let a1 = BLS24Fp4::conditional_select(&a.a1, &b.a1, choice);
-        let a2 = BLS24Fp4::conditional_select(&a.a2, &b.a2, choice);
-        let a3 = BLS24Fp4::conditional_select(&a.a3, &b.a3, choice);
-        let a4 = BLS24Fp4::conditional_select(&a.a4, &b.a4, choice);
-        let a5 = BLS24Fp4::conditional_select(&a.a5, &b.a5, choice);
-        Self { a0, a1, a2, a3, a4, a5 }
+impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Fp24<PAR, LIMBS> {}
+
+impl<PAR: BLS24Param, const LIMBS: usize> CtAssign for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
+    fn ct_assign(&mut self, src: &Self, choice: Choice) {
+        self.a0.ct_assign(&src.a0, choice);
+        self.a1.ct_assign(&src.a1, choice);
+        self.a2.ct_assign(&src.a2, choice);
+        self.a3.ct_assign(&src.a3, choice);
+        self.a4.ct_assign(&src.a4, choice);
+        self.a5.ct_assign(&src.a5, choice);
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Fp24<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> CtEq for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn ct_eq(&self, other: &Self) -> Choice {
         self.a0.ct_eq(&other.a0) & self.a1.ct_eq(&other.a1) & self.a2.ct_eq(&other.a2) &
-        self.a3.ct_eq(&other.a3) & self.a4.ct_eq(&other.a4) & self.a5.ct_eq(&other.a5)
+            self.a3.ct_eq(&other.a3) & self.a4.ct_eq(&other.a4) & self.a5.ct_eq(&other.a5)
     }
 
+    #[inline]
     fn ct_ne(&self, other: &Self) -> Choice {
         self.a0.ct_ne(&other.a0) | self.a1.ct_ne(&other.a1) | self.a2.ct_ne(&other.a2) |
-        self.a3.ct_ne(&other.a3) | self.a4.ct_ne(&other.a4) | self.a5.ct_ne(&other.a5)
+            self.a3.ct_ne(&other.a3) | self.a4.ct_ne(&other.a4) | self.a5.ct_ne(&other.a5)
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Fp24<PAR, LIMBS> {}
+impl<PAR: BLS24Param, const LIMBS: usize> CtSelect for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
+    fn ct_select(&self, other: &Self, choice: Choice) -> Self {
+        Self {
+            a0: self.a0.ct_select(&other.a0, choice),
+            a1: self.a1.ct_select(&other.a1, choice),
+            a2: self.a2.ct_select(&other.a2, choice),
+            a3: self.a3.ct_select(&other.a3, choice),
+            a4: self.a4.ct_select(&other.a4, choice),
+            a5: self.a5.ct_select(&other.a5, choice),
+        }
+    }
+}
 
 impl<PAR: BLS24Param, const LIMBS: usize> Debug for BLS24Fp24<PAR, LIMBS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -561,6 +540,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul for BLS24Fp24<PAR, LIMBS> {
     type Output = Self;
 
     /// Compute a product in <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         let mut val = self;
         val *= rhs;
@@ -573,6 +553,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for Word {
 
     /// Compute the product of an integer left factor
     /// by a right factor from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: BLS24Fp24<PAR, LIMBS>) -> Self::Output {
         Self::Output {
             a0: self*rhs.a0, a1: self*rhs.a1, a2: self*rhs.a2,
@@ -586,6 +567,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for Uint<LI
 
     /// Compute the product of an integer left factor
     /// by a right factor from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: BLS24Fp24<PAR, LIMBS>) -> Self::Output {
         Self::Output {
             a0: self*rhs.a0, a1: self*rhs.a1, a2: self*rhs.a2,
@@ -599,6 +581,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for BLS24Fp
 
     /// Compute the product of a left factor from <i><b>F</b><sub>p</sub></i>
     /// by a right factor from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: BLS24Fp24<PAR, LIMBS>) -> Self::Output {
         Self::Output {
             a0: self*rhs.a0, a1: self*rhs.a1, a2: self*rhs.a2,
@@ -612,6 +595,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for BLS24Fp
 
     /// Compute the product of a left factor from <i><b>F</b><sub>p&sup2;</sub></i>
     /// by a right factor from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: BLS24Fp24<PAR, LIMBS>) -> Self::Output {
         Self::Output {
             a0: self*rhs.a0, a1: self*rhs.a1, a2: self*rhs.a2,
@@ -625,6 +609,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for BLS24Fp
 
     /// Compute the product of a left factor from <i><b>F</b><sub>p&#x2074;</sub></i>
     /// by a right factor from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub>.
+    #[inline]
     fn mul(self, rhs: BLS24Fp24<PAR, LIMBS>) -> Self::Output {
         Self::Output {
             a0: self*rhs.a0, a1: self*rhs.a1, a2: self*rhs.a2,
@@ -634,6 +619,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Fp24<PAR, LIMBS>> for BLS24Fp
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> MulAssign for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn mul_assign(&mut self, rhs: Self) {
         // Karatsuba multiplication:
 
@@ -673,6 +659,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> MulAssign for BLS24Fp24<PAR, LIMBS> {
 impl<PAR: BLS24Param, const LIMBS: usize> Neg for BLS24Fp24<PAR, LIMBS> {
     type Output = Self;
 
+    #[inline]
     fn neg(self) -> Self::Output {
         Self::Output {
             a0: -self.a0, a1: -self.a1, a2: -self.a2,
@@ -690,6 +677,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> One for BLS24Fp24<PAR, LIMBS> {
         }
     }
 
+    #[inline]
     fn is_one(&self) -> Choice {
         self.a0.is_one() &
         self.a1.is_zero() &
@@ -701,63 +689,62 @@ impl<PAR: BLS24Param, const LIMBS: usize> One for BLS24Fp24<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> PartialEq for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool { self.ct_eq(&other).into() }
 
+    #[inline]
     fn ne(&self, other: &Self) -> bool { self.ct_ne(&other).into() }
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Fp24<PAR, LIMBS> {
-    /// Pick a uniform element from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> by rejection sampling.
-    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
-        Self {
-            a0: BLS24Fp4::random(rng),
-            a1: BLS24Fp4::random(rng),
-            a2: BLS24Fp4::random(rng),
-            a3: BLS24Fp4::random(rng),
-            a4: BLS24Fp4::random(rng),
-            a5: BLS24Fp4::random(rng),
-        }
+    /// Try to pick a uniform element from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> by rejection sampling.
+    #[inline]
+    fn try_random_from_rng<R: TryRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        let try_a0 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        let try_a1 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        let try_a2 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        let try_a3 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        let try_a4 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        let try_a5 = match BLS24Fp4::try_random_from_rng(rng) {
+            Ok(val) => Ok(val),
+            Err(e) => Err(e),
+        }?;
+        Ok(Self { a0: try_a0, a1: try_a1, a2: try_a2, a3: try_a3, a4: try_a4, a5: try_a5 })
     }
 
-    /// Try to pick a uniform element from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> by rejection sampling.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
-        let try_a0 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        let try_a1 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        let try_a2 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        let try_a3 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        let try_a4 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        let try_a5 = match BLS24Fp4::try_random(rng) {
-            Ok(val) => Ok(val),
-            Err(e) => Err(e),
-        }?;
-
-        Ok(Self { a0: try_a0, a1: try_a1, a2: try_a2, a3: try_a3, a4: try_a4, a5: try_a5 })
+    /// Pick a uniform element from <b>F</b><sub><i>p&sup2;&#xFEFF;&#x2074;</i></sub> by rejection sampling.
+    #[inline]
+    fn random_from_rng<R: Rng + ?Sized>(rng: &mut R) -> Self {
+        Self {
+            a0: BLS24Fp4::random_from_rng(rng),
+            a1: BLS24Fp4::random_from_rng(rng),
+            a2: BLS24Fp4::random_from_rng(rng),
+            a3: BLS24Fp4::random_from_rng(rng),
+            a4: BLS24Fp4::random_from_rng(rng),
+            a5: BLS24Fp4::random_from_rng(rng),
+        }
     }
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Sub for BLS24Fp24<PAR, LIMBS> {
     type Output = Self;
 
+    #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
         let mut val = self;
         val -= rhs;
@@ -766,6 +753,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Sub for BLS24Fp24<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> SubAssign for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         self.a0 -= rhs.a0;
         self.a1 -= rhs.a1;
@@ -777,6 +765,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> SubAssign for BLS24Fp24<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Zero for BLS24Fp24<PAR, LIMBS> {
+    #[inline]
     fn zero() -> Self {
         Self {
             a0: BLS24Fp4::zero(), a1: BLS24Fp4::zero(), a2: BLS24Fp4::zero(),
@@ -784,11 +773,13 @@ impl<PAR: BLS24Param, const LIMBS: usize> Zero for BLS24Fp24<PAR, LIMBS> {
         }
     }
 
+    #[inline]
     fn is_zero(&self) -> Choice {
         self.a0.is_zero() & self.a1.is_zero() & self.a2.is_zero() &
         self.a3.is_zero() & self.a4.is_zero() & self.a5.is_zero()
     }
 
+    #[inline]
     fn set_zero(&mut self) {
         self.a0.set_zero();
         self.a1.set_zero();
@@ -841,13 +832,13 @@ mod tests {
         for _t in 0..TESTS {
             //println!("======== {}", _t);
 
-            let e24: BLS24Fp24<PAR, LIMBS> = BLS24Fp24::random(&mut rng);
+            let e24: BLS24Fp24<PAR, LIMBS> = BLS24Fp24::random_from_rng(&mut rng);
             //println!("e24 = {}", e24);
             //println!("e24 + 0 = {}", e24 + BLS24Fp24::zero());
             assert_eq!(e24 + BLS24Fp24::zero(), e24);
             //println!("e24*1 = {}", e24*BLS24Fp24::one());
             assert_eq!(e24*BLS24Fp24::one(), e24);
-            let e4: BLS24Fp4<PAR, LIMBS> = BLS24Fp4::random(&mut rng);
+            let e4: BLS24Fp4<PAR, LIMBS> = BLS24Fp4::random_from_rng(&mut rng);
             assert_eq!(BLS24Fp24::from_Fp4(e4), BLS24Fp24::from([e4, BLS24Fp4::zero(), BLS24Fp4::zero(), BLS24Fp4::zero(), BLS24Fp4::zero(), BLS24Fp4::zero()]));
 
             // addition vs subtraction:
@@ -884,7 +875,7 @@ mod tests {
             //println!("k24*e24 = {}", k24*e24);
             //println!("k24*e24 ? {}", BLS24Fp::from_word(k24)*e24);
             assert_eq!(k24*e24, BLS24Fp::from_word(k24)*e24);
-            let u24 = Uint::random_mod(&mut rng, &NonZero::new(p).unwrap());
+            let u24 = Uint::random_mod_vartime(&mut rng, &NonZero::new(p).unwrap());
             //println!("u24 = {}", u24.to_string_radix_vartime(20));
             //println!("u24*e24 = {}", u24*e24);
             assert_eq!(u24*e24, BLS24Fp::from_uint(u24)*e24);
@@ -892,15 +883,15 @@ mod tests {
 
             // norm homomorphism:
             //println!("|e24|_4 = {}", e24.norm4());
-            let e25: BLS24Fp24<PAR, LIMBS> = BLS24Fp24::random(&mut rng);
+            let e25: BLS24Fp24<PAR, LIMBS> = BLS24Fp24::random_from_rng(&mut rng);
             //println!("e25 = {}", e13);
             //println!("|e25|_4 = {}", e25.norm4());
             //println!("|e24*e25| = |e24|*|e25| ? {}", (e24*e25).norm() == e24.norm()*e25.norm());
             assert_eq!((e24*e25).norm(), e24.norm()*e25.norm());
 
-            let f24 = BLS24Fp24::random(&mut rng);
+            let f24 = BLS24Fp24::random_from_rng(&mut rng);
             //println!("f24     = {}", f24);
-            let g24 = BLS24Fp24::random(&mut rng);
+            let g24 = BLS24Fp24::random_from_rng(&mut rng);
             //println!("g24     = {}", g24);
 
             // commutativity of addition and multiplication:

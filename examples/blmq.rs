@@ -10,13 +10,11 @@ use bls24_curves::bls24point::BLS24Point;
 use bls24_curves::bls24point4::BLS24Point4;
 use bls24_curves::bls24zr::BLS24Zr;
 use bls24_curves::traits::{BLS24Field, One};
-use crypto_bigint::{Random, Uint, Zero};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crypto_bigint::rand_core::RngCore;
+use crypto_bigint::{Choice, CtAssign, CtEq, Random, Uint, Zero};
+use crypto_bigint::rand_core::Rng;
+use shake::{ExtendableOutput, Shake256};
 use std::marker::PhantomData;
 use std::time::SystemTime;
-use sha3::digest::ExtendableOutput;
-use sha3::Shake256;
 
 /// The Barreto-Libert-McCullagh-Quisquater (BLMQ) identity-based signature scheme over BLS24 curves.
 ///
@@ -61,7 +59,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
     /// NB: By hashing a PKG ID to curve group generators, the public parameters can be reduced to that ID,
     /// <i>P<sub>pub</sub></i>, and <i>Q<sub>pub</sub></i>, with the remaining values to be computed on demand.
     #[allow(non_snake_case)]
-    pub fn setup<R: RngCore + ?Sized>(rng: &mut R)
+    pub fn setup<R: Rng + ?Sized>(rng: &mut R)
             -> ((BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Fp24<PAR, LIMBS>),
                 BLS24Zr<PAR, LIMBS>) {
         /*
@@ -75,7 +73,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
         let P = BLS24Point::point_factory(BLS24Fp::shake256(&PKG_ID)).elim_cof();
         let Q = BLS24Point4::point_factory(BLS24Fp4::shake256(&PKG_ID)).elim_cof();
         // */
-        let sk = BLS24Zr::random(rng);
+        let sk = BLS24Zr::random_from_rng(rng);
         let Ppub = sk*P;
         let Qpub = sk*Q;
         let g = BLS24Pairing::ate(&Q, &P);
@@ -215,13 +213,13 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
     /// and a message <i>m</i>,
     /// generate a BLMQ signature <i>&sigma;</i> for <i>m</i> under <i>S<sub>ID</sub></i>.
     #[allow(non_snake_case)]
-    pub fn sign<R: RngCore + ?Sized>(rng: &mut R,
+    pub fn sign<R: Rng + ?Sized>(rng: &mut R,
             pk: &(BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Fp24<PAR, LIMBS>),
             S_ID: &BLS24Point<PAR, LIMBS>,
             m: &[u8]) -> (BLS24Zr<PAR, LIMBS>, BLS24Point<PAR, LIMBS>) {
         // pick a random x from Z_n^* and compute r ← g^x:
         let g = pk.4;
-        let x = BLS24Zr::random(rng);
+        let x = BLS24Zr::random_from_rng(rng);
         let r = g.pow(&x.to_uint());
         // set h ← H_2(m,r) ∈ Z_n^*:
         let h = BLMQ::H2(&r, m);
@@ -254,7 +252,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
     /// generate a BLMQ signcryptogram <i>C</i> &#x2254; (<i>c</i>, <i>S</i>, <i>U</i>) on <i>m</i>
     /// encrypted for <i>ID_B</i> and signed under <i>S<sub>ID_A</sub></i>.
     #[allow(non_snake_case)]
-    pub fn signcrypt<R: RngCore + ?Sized>(rng: &mut R,
+    pub fn signcrypt<R: Rng + ?Sized>(rng: &mut R,
             pk: &(BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Fp24<PAR, LIMBS>),
             S_ID_A: &BLS24Point<PAR, LIMBS>, ID_B: &String, m: &[u8])
             -> (Vec<u8>, BLS24Point<PAR, LIMBS>, BLS24Point<PAR, LIMBS>) {
@@ -262,7 +260,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
         let P = pk.0;
         let Ppub = pk.2;
         let g = pk.4;
-        let x = BLS24Zr::random(rng);
+        let x = BLS24Zr::random_from_rng(rng);
         let r = g.pow(&x.to_uint());
         let mut c: Vec<u8> = vec![0u8; m.len()];
         BLMQ::H3(&r, &mut c);
@@ -309,13 +307,12 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLMQ<PAR, LIMBS> {
         let accept = r.ct_eq(&w) & m.len().ct_eq(&c.len());
         // if the acceptance condition holds, extract the message m and the signature (h, S):
         for j in 0..d.len() {
-            m[j].conditional_assign(&d[j], accept);
+            m[j].ct_assign(&d[j], accept);
         }
-        sigma.0.conditional_assign(&h, accept);
-        sigma.1.conditional_assign(&S, accept);
+        sigma.0.ct_assign(&h, accept);
+        sigma.1.ct_assign(&S, accept);
         accept
     }
-
 }
 
 #[allow(non_snake_case)]

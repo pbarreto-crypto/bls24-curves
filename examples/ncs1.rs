@@ -1,14 +1,13 @@
 use bls24_curves::bls24fp::BLS24Fp;
 use bls24_curves::bls24fp4::BLS24Fp4;
 use bls24_curves::bls24pairing::BLS24Pairing;
-use bls24_curves::bls24param::{BLS24Param, BLS24317Param, BLS24324Param, BLS24329Param, BLS24339Param, BLS24341Param, BLS24342Param, BLS24343Param, BLS24347Param, BLS24348Param, BLS24349Param, BLS24358Param, BLS24362Param, BLS24365Param, BLS24379Param, BLS24380Param, BLS24407Param, BLS24409Param, BLS24429Param, BLS24449Param, BLS24454Param, BLS24459Param, BLS24469Param, BLS24470Param, BLS24471Param, BLS24472Param, BLS24477Param, BLS24481Param, BLS24485Param, BLS24489Param, BLS24507Param, BLS24519Param, BLS24520Param, BLS24529Param, BLS24539Param, BLS24549Param, BLS24559Param, BLS24569Param, BLS24571Param, BLS24587Param, BLS24589Param, BLS24600Param, BLS24605Param, BLS24609Param, BLS24617Param, BLS24619Param, BLS24623Param, BLS24627Param, BLS24629Param, BLS24631Param, BLS24639Param};
+use bls24_curves::bls24param::{BLS24317Param, BLS24Param};
 use bls24_curves::bls24point::BLS24Point;
 use bls24_curves::bls24point4::BLS24Point4;
-use crypto_bigint::{NonZero, Random, RandomMod, Uint, Zero};
-use crypto_bigint::subtle::{Choice, ConstantTimeEq};
+use crypto_bigint::{Choice, CtEq, NonZero, Random, RandomMod, Uint, Zero};
+use crypto_bigint::rand_core::Rng;
 use std::marker::PhantomData;
 use std::time::SystemTime;
-use crypto_bigint::rand_core::RngCore;
 
 /// The Boneh-Freeman-Katz-Waters NCS&#x2081; scheme for signing a linear subspace.
 ///
@@ -37,7 +36,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> NCS1<PAR, LIMBS> {
     /// <b>G</b><i>&#x2081;</i> &times; <b>G</b><i>&#x2082;</i> &times; <b>G</b><i>&#x2082;</i>
     /// and the secret key <i>sk</i>.
     #[allow(non_snake_case)]
-    pub fn setup<R: RngCore + ?Sized>(rng: &mut R)
+    pub fn setup<R: Rng + ?Sized>(rng: &mut R)
                  -> ((BLS24Point<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>, BLS24Point4<PAR, LIMBS>), Uint<LIMBS>) {
         /*
         // default generators:
@@ -46,11 +45,11 @@ impl<PAR: BLS24Param, const LIMBS: usize> NCS1<PAR, LIMBS> {
         // */
         //*
         // individualized generators:
-        let P = BLS24Point::point_factory(BLS24Fp::random(rng));
-        let Q = BLS24Point4::point_factory(BLS24Fp4::random(rng)).elim_cof();
+        let P = BLS24Point::point_factory(BLS24Fp::random_from_rng(rng));
+        let Q = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(rng)).elim_cof();
         // */
         let n: Uint<LIMBS> = Uint::from_words(PAR::ORDER.try_into().unwrap());
-        let sk = Uint::random_mod(rng, &NonZero::new(n).unwrap());
+        let sk = Uint::random_mod_vartime(rng, &NonZero::new(n).unwrap());
         let R = sk*Q;
         let pk = (P, Q, R);
         (pk, sk)

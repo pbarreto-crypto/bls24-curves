@@ -8,8 +8,7 @@ use crate::bls24param::BLS24Param;
 use crate::bls24point::BLS24Point;
 use crate::bls24point4::BLS24Point4;
 use crate::traits::{BLS24Field, One};
-use crypto_bigint::subtle::{ConditionallySelectable};
-use crypto_bigint::Zero;
+use crypto_bigint::{CtAssign, Zero};
 use std::marker::PhantomData;
 
 #[allow(non_snake_case)]
@@ -125,7 +124,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Pairing<PAR, LIMBS> {
                 m = k;
             }
         }
-        f = BLS24Fp24::conditional_select(&f, &BLS24Fp24::one(), f.is_zero());
+        f.ct_assign(&BLS24Fp24::one(), f.is_zero());
         f = f.final_exp();  // f = f^((p^24 - 1)/r)
         assert!(bool::from(f.pow_r().is_one()));
         f
@@ -281,7 +280,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Pairing<PAR, LIMBS> {
             }
         }
         assert_eq!(pre, 3*PAR::TRIPLES as usize);
-        f = BLS24Fp24::conditional_select(&f, &BLS24Fp24::one(), f.is_zero());
+        f.ct_assign(&BLS24Fp24::one(), f.is_zero());
         f = f.final_exp();  // f = f^((p^24 - 1)/r)
         assert!(bool::from(f.pow_r().is_one()));
         f
@@ -291,11 +290,10 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Pairing<PAR, LIMBS> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bls24fp::BLS24Fp;
     use crate::bls24param::{BLS24317Param, BLS24324Param, BLS24329Param, BLS24339Param, BLS24341Param, BLS24342Param, BLS24343Param, BLS24347Param, BLS24348Param, BLS24349Param, BLS24358Param, BLS24362Param, BLS24365Param, BLS24379Param, BLS24380Param, BLS24407Param, BLS24409Param, BLS24429Param, BLS24449Param, BLS24454Param, BLS24459Param, BLS24469Param, BLS24470Param, BLS24471Param, BLS24472Param, BLS24477Param, BLS24481Param, BLS24485Param, BLS24489Param, BLS24507Param, BLS24519Param, BLS24520Param, BLS24529Param, BLS24539Param, BLS24549Param, BLS24559Param, BLS24569Param, BLS24571Param, BLS24587Param, BLS24589Param, BLS24600Param, BLS24605Param, BLS24609Param, BLS24617Param, BLS24619Param, BLS24623Param, BLS24627Param, BLS24629Param, BLS24631Param, BLS24639Param};
-    use crypto_bigint::{Random, Uint};
-    use crypto_bigint::subtle::Choice;
     use std::time::SystemTime;
+    use crypto_bigint::{Choice, Random, Uint};
+    use crate::bls24fp::BLS24Fp;
     use super::*;
 
     const TESTS: usize = 10;
@@ -365,7 +363,7 @@ mod tests {
         //println!("**** a(G2, G1)^r = {}", g0.pow_r());
         assert!(bool::from(!g0.is_one() & g0.pow_r().is_one()));
         for _t in 0..TESTS {
-            let k = Uint::random(&mut rng);
+            let k = Uint::random_from_rng(&mut rng);
             //println!("k = {}", k);
             let a = BLS24Pairing::ate(&(k*G2), &G1);
             //println!("a = {}", a);
@@ -380,16 +378,16 @@ mod tests {
             assert_eq!(a, c);
             assert_eq!(b, c);
 
-            let P1 = BLS24Point::point_factory(BLS24Fp::random(&mut rng)).elim_cof();
+            let P1 = BLS24Point::point_factory(BLS24Fp::random_from_rng(&mut rng)).elim_cof();
             //println!("P1 = {}", P1);
             assert!(bool::from(!P1.is_zero() & (r*P1).is_zero()));
-            let P2 = BLS24Point::point_factory(BLS24Fp::random(&mut rng)).elim_cof();
+            let P2 = BLS24Point::point_factory(BLS24Fp::random_from_rng(&mut rng)).elim_cof();
             //println!("P2 = {}", P2);
             assert!(bool::from(!P2.is_zero() & (r*P2).is_zero()));
-            let Q1 = BLS24Point4::point_factory(BLS24Fp4::random(&mut rng)).elim_cof();
+            let Q1 = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(&mut rng)).elim_cof();
             //println!("Q1' = {}", Q1);
             assert!(bool::from(!Q1.is_zero() & (r*Q1).is_zero()));
-            let Q2 = BLS24Point4::point_factory(BLS24Fp4::random(&mut rng)).elim_cof();
+            let Q2 = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(&mut rng)).elim_cof();
             //println!("Q2' = {}", Q2);
             assert!(bool::from(!Q2.is_zero() & (r*Q2).is_zero()));
 

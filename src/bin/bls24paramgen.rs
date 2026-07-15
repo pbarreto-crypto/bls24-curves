@@ -30,9 +30,8 @@
 //! (this upper bounds the degree <i>m</i> at 127, but for the actual parameters the degree
 //! does not exceed 64 anyway).
 
-use crypto_bigint::{Integer, Limb, NonZero, One, Uint, Word, Zero};
-use crypto_bigint::subtle::ConditionallySelectable;
-use std::ops::{Div,Shl};
+use crypto_bigint::{CtSelect, Limb, NonZero, One, Uint, Word, Zero};
+use std::ops::{Div, Shl};
 
 const LIMBS: usize = 16;  // maximum supported size (1024 bits)
 
@@ -386,8 +385,7 @@ fn bls24params() {
 
         let sqrt_m3: Uint<LIMBS> = sqrt(Uint::from_word(3).neg_mod(&nzp), p);  // sqrt(-3) mod p
         let sqrt_m3_w = sqrt_m3.to_words();
-        let svdw: Uint<LIMBS> = Uint::conditional_select(&(sqrt_m3 - n1), &(sqrt_m3 - n1 + p),
-                                                         (sqrt_m3 - n1).is_odd()) >> 1;  // (-1 + sqrt(-3))/2
+        let svdw: Uint<LIMBS> = (sqrt_m3 - n1).ct_select(&(sqrt_m3 - n1 + p), (sqrt_m3 - n1).is_odd()) >> 1;  // (-1 + sqrt(-3))/2
         let svdw_w = svdw.to_words();
 
         println!();

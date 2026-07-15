@@ -6,9 +6,8 @@ use crate::bls24fp4::BLS24Fp4;
 use crate::bls24param::BLS24Param;
 use crate::bls24zr::BLS24Zr;
 use crate::traits::{BLS24Field, One};
-use crypto_bigint::{Random, Uint, Zero};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use crypto_bigint::rand_core::{RngCore, TryRngCore};
+use crypto_bigint::{Choice, CtAssign, CtEq, CtSelect, Random, Uint, Zero};
+use crypto_bigint::rand_core::{Rng, TryRng};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -22,7 +21,6 @@ pub struct BLS24Point4<PAR: BLS24Param, const LIMBS: usize> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> BLS24Point4<PAR, LIMBS> {
-
     /// Create a normalized point on a BLS24 curve twist
     /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>
     /// from a given affine <i>X'</i>-coordinate and the least significant bit (LSB) of the <i>Y'</i>-coordinate.
@@ -34,7 +32,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Point4<PAR, LIMBS> {
         let y2 = x.cb() + bt;
         let mut y = y2.sqrt();
         assert_eq!(y.sq(), y2);
-        y = BLS24Fp4::conditional_select(&y, &(-y), y.is_odd() ^ y_lsb);
+        y.ct_assign(&(-y), y.is_odd() ^ y_lsb);
         Self { x, y, z: BLS24Fp4::one() }
     }
 
@@ -95,11 +93,11 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Point4<PAR, LIMBS> {
     #[inline]
     pub(crate) fn normalize(&self) -> Self {
         let ch = self.z.is_zero();
-        let inv = BLS24Fp4::conditional_select(&self.z, &self.y, ch).inv();
+        let inv = self.z.ct_select(&self.y, ch).inv();
         Self {
             x: self.x*inv,
             y: self.y*inv,
-            z: BLS24Fp4::conditional_select(&BLS24Fp4::one(), &BLS24Fp4::zero(), ch),
+            z: BLS24Fp4::one().ct_select(&BLS24Fp4::zero(), ch),
         }
     }
 
@@ -218,8 +216,8 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Point4<PAR, LIMBS> {
 
         // constant-time sequential search for the proper choice of x:
         let mut xc = x2;
-        xc = BLS24Fp4::conditional_select(&xc, &x1, q2.ct_ne(&1) & q1.ct_ne(&(-1)));
-        xc = BLS24Fp4::conditional_select(&xc, &x0, q0.ct_eq(&1));
+        xc.ct_assign(&x1, q2.ct_ne(&1) & q1.ct_ne(&(-1)));
+        xc.ct_assign(&x0, q0.ct_eq(&1));
         assert!((xc.cb() + bt).legendre() >= 0);
         let leg = t.legendre();
 
@@ -502,7 +500,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Point4<PAR, LIMBS> {
         let N = self.normalize();
         // ANSI X9.62 'compressed' prefix: 0x02 | lsb(N.y)
         let mut cp = 0x2u8;  // lsb(N.y) == 0
-        cp.conditional_assign(&0x3u8, N.y.is_odd());  // lsb(N.y) == 1
+        cp.ct_assign(&0x3u8, N.y.is_odd());  // lsb(N.y) == 1
         let mut bytes = Vec::new();
         bytes.push(cp);
         let mut next = N.x.to_bytes(); bytes.append(&mut next);
@@ -522,6 +520,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Add for BLS24Point4<PAR, LIMBS> {
     /// <a href="https://link.springer.com/content/pdf/10.1007/978-3-662-49890-3_16">
     /// "Complete addition formulas for prime order elliptic curves"</a>
     /// (Algorithm 7), Eurocrypt 2016, LNCS 9665 (part I), pp. 403--428, Springer, 2016.
+    #[inline]
     fn add(self, other: Self) -> Self::Output {
         let mut point = self;
         point += other;
@@ -540,6 +539,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> AddAssign for BLS24Point4<PAR, LIMBS> 
     /// <a href="https://link.springer.com/content/pdf/10.1007/978-3-662-49890-3_16">
     /// "Complete addition formulas for prime order elliptic curves"</a>
     /// (Algorithm 7), Eurocrypt 2016, LNCS 9665 (part I), pp. 403--428, Springer, 2016.
+    #[inline]
     fn add_assign(&mut self, pair: Self) {
         let x1 = self.x;
         let y1 = self.y;
@@ -609,6 +609,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> AddAssign for BLS24Point4<PAR, LIMBS> 
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Point4<PAR, LIMBS> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             x: self.x.clone(),
@@ -620,16 +621,17 @@ impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Point4<PAR, LIMBS> {
 
 impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Point4<PAR, LIMBS> {}
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConditionallySelectable for BLS24Point4<PAR, LIMBS> {
-    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        let x = BLS24Fp4::conditional_select(&a.x, &b.x, choice);
-        let y = BLS24Fp4::conditional_select(&a.y, &b.y, choice);
-        let z = BLS24Fp4::conditional_select(&a.z, &b.z, choice);
-        Self { x, y, z }
+impl<PAR: BLS24Param, const LIMBS: usize> CtAssign for BLS24Point4<PAR, LIMBS> {
+    #[inline]
+    fn ct_assign(&mut self, src: &Self, choice: Choice) {
+        self.x.ct_assign(&src.x, choice);
+        self.y.ct_assign(&src.y, choice);
+        self.z.ct_assign(&src.z, choice);
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Point4<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> CtEq for BLS24Point4<PAR, LIMBS> {
+    #[inline]
     fn ct_eq(&self, pair: &Self) -> Choice {
         // x/z = pair.x/pair.z <=> x*pair.z = pair.x*z
         // y/z = pair.y/pair.z <=> y*pair.z = pair.y*z
@@ -637,11 +639,23 @@ impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Point4<PAR, LI
             (self.y*pair.z).ct_eq(&(pair.y*self.z))
     }
 
+    #[inline]
     fn ct_ne(&self, pair: &Self) -> Choice {
         // x/z != pair.x/pair.z <=> x*pair.z != pair.x*z
         // y/z != pair.y/pair.z <=> y*pair.z != pair.y*z
         (self.x*pair.z).ct_ne(&(pair.x*self.z)) |
             (self.y*pair.z).ct_ne(&(pair.y*self.z))
+    }
+}
+
+impl<PAR: BLS24Param, const LIMBS: usize> CtSelect for BLS24Point4<PAR, LIMBS> {
+    #[inline]
+    fn ct_select(&self, other: &Self, choice: Choice) -> Self {
+        Self {
+            x: self.x.ct_select(&other.x, choice),
+            y: self.y.ct_select(&other.y, choice),
+            z: self.z.ct_select(&other.z, choice),
+        }
     }
 }
 
@@ -661,6 +675,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Display for BLS24Point4<PAR, LIMBS> {
 impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Point4<PAR, LIMBS>> for Uint<LIMBS> {
     type Output = BLS24Point4<PAR, LIMBS>;
 
+    #[inline]
     fn mul(self, point: BLS24Point4<PAR, LIMBS>) -> Self::Output {
         let mut v = point;
         v *= self;
@@ -671,6 +686,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Point4<PAR, LIMBS>> for Uint<
 impl<PAR: BLS24Param, const LIMBS: usize> Mul<BLS24Point4<PAR, LIMBS>> for BLS24Zr<PAR, LIMBS> {
     type Output = BLS24Point4<PAR, LIMBS>;
 
+    #[inline]
     fn mul(self, point: BLS24Point4<PAR, LIMBS>) -> Self::Output {
         let mut v = point;
         v *= self.to_uint();
@@ -687,6 +703,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> MulAssign<Uint<LIMBS>> for BLS24Point4
     /// * Alfred J. Menezes, Paul C. van Oorschot, Scott A. Vanstone,
     /// <a href="https://cacr.uwaterloo.ca/hac/">"Handbook of Applied Cryptography"</a>,
     /// CRC Press (1997), section 14.6 (Exponentiation), algorithm 14.82.
+    #[inline]
     fn mul_assign(&mut self, scalar: Uint<LIMBS>) {
         // prepare a table such that t[d] = d*P, where 0 <= d < 16:
         let mut t = [Self::zero(); 16];
@@ -705,7 +722,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> MulAssign<Uint<LIMBS>> for BLS24Point4
             // perform constant-time sequential search on t to extract t[d]:
             let mut w = Self::zero();
             for e in 0..16 {  // t[] contains 16 points...
-                w = Self::conditional_select(&w, &t[e], e.ct_eq(&d)); // ... (of which only the d-th is to be kept)
+                w.ct_assign(&t[e], e.ct_eq(&d)); // ... (of which only the d-th is to be kept)
             }
             v += w;  // accumulate pt[d] into v
         }
@@ -717,6 +734,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Neg for BLS24Point4<PAR, LIMBS> {
     type Output = Self;
 
     /// Compute the opposite of a point on a BLS24 curve.
+    #[inline]
     fn neg(self) -> Self::Output {
         Self::Output {
             x: self.x,
@@ -727,35 +745,40 @@ impl<PAR: BLS24Param, const LIMBS: usize> Neg for BLS24Point4<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> PartialEq<Self> for BLS24Point4<PAR, LIMBS> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(&other).into()
     }
 
+    #[inline]
     fn ne(&self, other: &Self) -> bool {
         self.ct_ne(&other).into()
     }
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Point4<PAR, LIMBS> {
-    /// Pick a uniform point from the <i>n</i>-torsion of the BLS24 curve twist
-    /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
-    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
-        Self::point_factory(BLS24Fp4::random(rng)).elim_cof()
-    }
-
     /// Try to pick a uniform point from the <i>n</i>-torsion of the BLS24 curve twist
     /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
-        match BLS24Fp4::try_random(rng) {
+    #[inline]
+    fn try_random_from_rng<R: TryRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        match BLS24Fp4::try_random_from_rng(rng) {
             Ok(val) => Ok(Self::point_factory(val).elim_cof()),
             Err(e) => Err(e),
         }
+    }
+
+    /// Pick a uniform point from the <i>n</i>-torsion of the BLS24 curve twist
+    /// <i>E'</i>/<b>F</b><sub><i>p&#x2074;</i></sub> : <i>Y'&sup2;Z'</i> = <i>X'&sup3;</i> + <i>b'Z'&sup3;</i>.
+    #[inline]
+    fn random_from_rng<R: Rng + ?Sized>(rng: &mut R) -> Self {
+        Self::point_factory(BLS24Fp4::random_from_rng(rng)).elim_cof()
     }
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Sub for BLS24Point4<PAR, LIMBS> {
     type Output = Self;
 
+    #[inline]
     fn sub(self, other: Self) -> Self::Output {
         let mut point = self;
         point -= other;
@@ -764,6 +787,7 @@ impl<PAR: BLS24Param, const LIMBS: usize> Sub for BLS24Point4<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> SubAssign for BLS24Point4<PAR, LIMBS> {
+    #[inline]
     fn sub_assign(&mut self, pair: Self) {
         self.add_assign(pair.neg())
     }
@@ -773,16 +797,19 @@ impl<PAR: BLS24Param, const LIMBS: usize> Zero for BLS24Point4<PAR, LIMBS> {
     /// Create an instance of the neutral element ("point at infinity") on a BLS24 curve
     /// <i>E</i>/<b>F</b><sub><i>p</i></sub> : <i>Y&sup2;Z</i> = <i>X&sup3; + bZ&sup3;</i>
     /// in projective coordinates, hence &lbrack;<i>0</i> : <i>1</i> : <i>0</i>&rbrack;.
+    #[inline]
     fn zero() -> Self {
         Self { x: BLS24Fp4::zero(), y: BLS24Fp4::one(), z: BLS24Fp4::zero() }
     }
 
     /// Determine if this projective point is the neutral element
     /// on a BLS24 curve <i>E/<b>F</b><sub>p</sub>: Y&sup2;Z = X&sup3; + bZ&sup3;</i>.
+    #[inline]
     fn is_zero(&self) -> Choice {
         self.z.is_zero()
     }
 
+    #[inline]
     fn set_zero(&mut self) {
         self.x.set_zero();  // otherwise the curve equation Y^2*Z = X^3 + b*Z^3 is not satisfied
         self.z.set_zero()
@@ -859,11 +886,11 @@ mod tests {
             //println!("======== {}", _t);
 
             // hashing to G_2:
-            let Q1: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random(&mut rng)).elim_cof();
+            let Q1: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(&mut rng)).elim_cof();
             //println!("Q1 = {}", Q1);
-            let Q2: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random(&mut rng)).elim_cof();
+            let Q2: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(&mut rng)).elim_cof();
             //println!("Q2 = {}", Q2);
-            let Q3: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random(&mut rng)).elim_cof();
+            let Q3: BLS24Point4<PAR, LIMBS> = BLS24Point4::point_factory(BLS24Fp4::random_from_rng(&mut rng)).elim_cof();
             //println!("Q3 = {}", Q3);
 
             // point construction:

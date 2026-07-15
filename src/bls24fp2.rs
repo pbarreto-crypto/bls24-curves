@@ -4,9 +4,8 @@ compile_error!("this crate requires 64-bit limbs");
 use crate::bls24fp::BLS24Fp;
 use crate::bls24param::BLS24Param;
 use crate::traits::{BLS24Field, One};
-use crypto_bigint::{Random, Uint, Word, Zero};
-use crypto_bigint::rand_core::{RngCore, TryRngCore};
-use crypto_bigint::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use crypto_bigint::{Choice, CtAssign, CtEq, CtSelect, Random, Uint, Word, Zero};
+use crypto_bigint::rand_core::{Rng, TryRng};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -182,18 +181,18 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp2<PAR, LIMBS> {
         let mut m = n*inv_m;
         let qcn = m*inv_m;  // quadratic character of n: qcn in {-1 mod p, 0, 1}
         let sqn = qcn.is_zero() | qcn.is_one();  // whether or not n is a square
-        let a: BLS24Fp<PAR, LIMBS> = BLS24Fp::conditional_select(&(self.re - self.im), &self.re, sqn);
-        let b: BLS24Fp<PAR, LIMBS> = BLS24Fp::conditional_select(&(self.re + self.im), &self.im, sqn);
-        m *= BLS24Fp::conditional_select(&lambda, &one, sqn);
-        let tau = BLS24Fp::conditional_select(&omega, &one, sqn);
-        let z = BLS24Fp::conditional_select(&(a + m).half(), &a, b.is_zero());
+        let a: BLS24Fp<PAR, LIMBS> = (self.re - self.im).ct_select(&self.re, sqn);
+        let b: BLS24Fp<PAR, LIMBS> = (self.re + self.im).ct_select(&self.im, sqn);
+        m *= lambda.ct_select(&one, sqn);
+        let tau = omega.ct_select(&one, sqn);
+        let z = (a + m).half().ct_select(&a, b.is_zero());
         let t = z.inv_sqrt();
         let r = z*t;
         let s = b*t.half();
         let qcz = r*t;  // quadratic character of z: qcz in {-1 mod p, 0, 1}
         let sqz = qcz.is_zero() | qcz.is_one();  // whether or not z is a square
-        let rho = BLS24Fp::conditional_select(&s, &r, sqz)*tau;
-        let sigma = BLS24Fp::conditional_select(&(-r), &s, sqz)*tau;
+        let rho = s.ct_select(&r, sqz)*tau;
+        let sigma = (-r).ct_select(&s, sqz)*tau;
         BLS24Fp2::from_Fp_pair(rho, sigma)
     }
 
@@ -212,19 +211,19 @@ impl<PAR: BLS24Param, const LIMBS: usize> BLS24Fp2<PAR, LIMBS> {
         let mut m = n*inv_m;
         let qcn = m*inv_m;  // quadratic character of n: qcn in {-1 mod p, 0, 1}
         let sqn = qcn.is_zero() | qcn.is_one();  // whether or not n is a square
-        let a: BLS24Fp<PAR, LIMBS> = BLS24Fp::conditional_select(&(self.re - self.im), &self.re, sqn);
-        let b: BLS24Fp<PAR, LIMBS> = BLS24Fp::conditional_select(&(self.re + self.im), &self.im, sqn);
-        m *= BLS24Fp::conditional_select(&lambda, &one, sqn);
-        let tau = BLS24Fp::conditional_select(&omega, &one, sqn);
-        let z = BLS24Fp::conditional_select(&(a + m).half(), &a, b.is_zero());
+        let a: BLS24Fp<PAR, LIMBS> = (self.re - self.im).ct_select(&self.re, sqn);
+        let b: BLS24Fp<PAR, LIMBS> = (self.re + self.im).ct_select(&self.im, sqn);
+        m *= lambda.ct_select(&one, sqn);
+        let tau = omega.ct_select(&one, sqn);
+        let z = (a + m).half().ct_select(&a, b.is_zero());
         let t = z.inv_sqrt();
         let r = z*t;
         let s = b*t.half();
         let qcz = r*t;  // quadratic character of z: qcz in {-1 mod p, 0, 1}
         let sqz = qcz.is_zero() | qcz.is_one();  // whether or not z is a square
-        let rho = BLS24Fp::conditional_select(&s, &r, sqz)*tau;
-        let sigma = BLS24Fp::conditional_select(&(-r), &s, sqz)*tau;
-        let fudge = BLS24Fp::conditional_select(&(inv_m*omega), &inv_m, sqn);
+        let rho = s.ct_select(&r, sqz)*tau;
+        let sigma = (-r).ct_select(&s, sqz)*tau;
+        let fudge = (inv_m*omega).ct_select(&inv_m, sqn);
         fudge.sq()*BLS24Fp2::from_Fp_pair(rho, sigma)*BLS24Fp2::from_Fp_pair(a, -b)
     }
 
@@ -328,17 +327,17 @@ impl<PAR: BLS24Param, const LIMBS: usize> Clone for BLS24Fp2<PAR, LIMBS> {
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConditionallySelectable for BLS24Fp2<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Fp2<PAR, LIMBS> {}
+
+impl<PAR: BLS24Param, const LIMBS: usize> CtAssign for BLS24Fp2<PAR, LIMBS> {
     #[inline]
-    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        Self {
-            re: BLS24Fp::conditional_select(&a.re, &b.re, choice),
-            im: BLS24Fp::conditional_select(&a.im, &b.im, choice),
-        }
+    fn ct_assign(&mut self, src: &Self, choice: Choice) {
+        self.re.ct_assign(&src.re, choice);
+        self.im.ct_assign(&src.im, choice);
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Fp2<PAR, LIMBS> {
+impl<PAR: BLS24Param, const LIMBS: usize> CtEq for BLS24Fp2<PAR, LIMBS> {
     #[inline]
     fn ct_eq(&self, other: &Self) -> Choice {
         self.re.ct_eq(&other.re) & self.im.ct_eq(&other.im)
@@ -350,7 +349,15 @@ impl<PAR: BLS24Param, const LIMBS: usize> ConstantTimeEq for BLS24Fp2<PAR, LIMBS
     }
 }
 
-impl<PAR: BLS24Param, const LIMBS: usize> Copy for BLS24Fp2<PAR, LIMBS> {}
+impl<PAR: BLS24Param, const LIMBS: usize> CtSelect for BLS24Fp2<PAR, LIMBS> {
+    #[inline]
+    fn ct_select(&self, other: &Self, choice: Choice) -> Self {
+        Self {
+            re: self.re.ct_select(&other.re, choice),
+            im: self.im.ct_select(&other.im, choice),
+        }
+    }
+}
 
 impl<PAR: BLS24Param, const LIMBS: usize> Debug for BLS24Fp2<PAR, LIMBS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -497,26 +504,27 @@ impl<PAR: BLS24Param, const LIMBS: usize> PartialEq for BLS24Fp2<PAR, LIMBS> {
 }
 
 impl<PAR: BLS24Param, const LIMBS: usize> Random for BLS24Fp2<PAR, LIMBS> {
-    /// Pick a uniform element from <b>F</b><sub><i>p&sup2;</i></sub> by rejection sampling.
-    #[inline]
-    fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
-        Self {
-            re: BLS24Fp::random(rng),
-            im: BLS24Fp::random(rng),
-        }
-    }
-
     /// Try to pick a uniform element from <b>F</b><sub><i>p&sup2;</i></sub> by rejection sampling.
-    fn try_random<R: TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> where R: TryRngCore {
-        let try_re = match BLS24Fp::try_random(rng) {
+    #[inline]
+    fn try_random_from_rng<R: TryRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        let try_re = match BLS24Fp::try_random_from_rng(rng) {
             Ok(val) => Ok(val),
             Err(e) => Err(e),
         }?;
-        let try_im = match BLS24Fp::try_random(rng) {
+        let try_im = match BLS24Fp::try_random_from_rng(rng) {
             Ok(val) => Ok(val),
             Err(e) => Err(e),
         }?;
         Ok(Self { re: try_re, im: try_im })
+    }
+
+    /// Pick a uniform element from <b>F</b><sub><i>p&sup2;</i></sub> by rejection sampling.
+    #[inline]
+    fn random_from_rng<R: Rng + ?Sized>(rng: &mut R) -> Self {
+        Self {
+            re: BLS24Fp::random_from_rng(rng),
+            im: BLS24Fp::random_from_rng(rng),
+        }
     }
 }
 
@@ -577,7 +585,7 @@ mod tests {
         BLS24623Param, BLS24627Param, BLS24629Param, BLS24631Param, BLS24639Param,
     };
     use crypto_bigint::{NonZero, RandomMod};
-    use crypto_bigint::rand_core::RngCore;
+    use crypto_bigint::rand_core::Rng;
     use std::time::SystemTime;
     use super::*;
 
@@ -605,7 +613,7 @@ mod tests {
         for _t in 0..TESTS {
             //println!("======== {}", _t);
 
-            let e2: BLS24Fp2<PAR, LIMBS> = BLS24Fp2::random(&mut rng);
+            let e2: BLS24Fp2<PAR, LIMBS> = BLS24Fp2::random_from_rng(&mut rng);
             //println!("e2 = {}", e2);
             //println!("e2 + 0 = {}", e2 + BLS24Fp2::zero());
             assert_eq!(e2 + BLS24Fp2::zero(), e2);
@@ -645,7 +653,7 @@ mod tests {
             assert!(bool::from((e2*e2.inv()).is_one()));
 
             // square roots:
-            let e1: BLS24Fp2<PAR, LIMBS> = BLS24Fp2::from_Fp(BLS24Fp::random(&mut rng));
+            let e1: BLS24Fp2<PAR, LIMBS> = BLS24Fp2::from_Fp(BLS24Fp::random_from_rng(&mut rng));
             let sr1 = e1.sqrt();
             assert!(e1.legendre() >= 0);
             assert!(bool::from(!sr1.is_zero() | e1.is_zero()));  // square root of Fp value always exists in Fp2
@@ -672,13 +680,13 @@ mod tests {
             //println!("k2*e2 = {}", k2*e2);
             //println!("k2*e2 ? {}", BLS24Fp::from_word(k2)*e2);
             assert_eq!(k2*e2, BLS24Fp::from_word(k2)*e2);
-            let u2 = Uint::random_mod(&mut rng, &NonZero::new(p).unwrap());
+            let u2 = Uint::random_mod_vartime(&mut rng, &NonZero::new(p).unwrap());
             //println!("u2 = {}", u2.to_string_radix_vartime(20));
             //println!("u2*e2 = {}", u2*e2);
             assert_eq!(u2*e2, BLS24Fp::from_uint(u2)*e2);
             assert_eq!(u2*e2, BLS24Fp2::from_Fp_pair(BLS24Fp::from_uint(u2), BLS24Fp::zero())*e2);
 
-            let e3 = BLS24Fp2::random(&mut rng);
+            let e3 = BLS24Fp2::random_from_rng(&mut rng);
             //println!("e3 = {}", e3);
 
             // norm homomorphism:
@@ -686,9 +694,9 @@ mod tests {
             //println!("|e2*e3| = |e2|*|e3| ? {}", (e2*e3).norm() == e2.norm()*e3.norm());
             assert_eq!((e2*e3).norm(), e2.norm()*e3.norm());
 
-            let f2 = BLS24Fp2::random(&mut rng);
+            let f2 = BLS24Fp2::random_from_rng(&mut rng);
             //println!("f2     = {}", f2);
-            let g2 = BLS24Fp2::random(&mut rng);
+            let g2 = BLS24Fp2::random_from_rng(&mut rng);
             //println!("g2     = {}", g2);
 
             // commutativity of addition and multiplication:
